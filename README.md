@@ -28,3 +28,10 @@ python3 -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/sim
 ```
 python3 -m pip install pyyaml requests
 ```
+
+## Run
+请参考`main.py`内的方法选择想要的执行方法
+```shell
+cd <python_samples folder>
+python3 ./main.py
+```
