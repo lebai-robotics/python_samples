@@ -98,37 +98,20 @@ class Robot():
             return asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_ROBOT_DATA))
 
     def get_robot_mode(self, rp = ReqProtocol.HTTP):
-        if rp == ReqProtocol.HTTP:
-            return RobotState(self.get_robot_data()['data']['robot_mode'])
-        elif rp == ReqProtocol.WS:
-            return RobotState(self.get_robot_data(ReqProtocol.WS)['data']['robot_mode'])
+        return RobotState(self.get_robot_data(rp)['data']['robot_mode'])
 
     def get_target_joints(self, rp = ReqProtocol.HTTP):
-        if rp == ReqProtocol.HTTP:
-            return self.get_robot_data()['data']['target_joint']
-        elif rp == ReqProtocol.WS:
-            return self.get_robot_data(ReqProtocol.WS)['data']['target_joint']
+        return self.get_robot_data(rp)['data']['target_joint']
 
     def get_actual_joints(self, rp = ReqProtocol.HTTP):
-        if rp == ReqProtocol.HTTP:
-            return self.get_robot_data()['data']['actual_joint']
-        elif rp == ReqProtocol.WS:
-            return self.get_robot_data(ReqProtocol.WS)['data']['actual_joint']
+        return self.get_robot_data(rp)['data']['actual_joint']
 
     def get_target_tcp_pose(self, rp = ReqProtocol.HTTP):
-        raw = ''
-        if rp == ReqProtocol.HTTP:
-            raw = self.get_robot_data()['data']['target_tcp_pose']
-        elif rp == ReqProtocol.WS:
-            raw = self.get_robot_data(ReqProtocol.WS)['data']['target_tcp_pose']
+        raw = self.get_robot_data(rp)['data']['target_tcp_pose']
         return CartesianPos(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
 
     def get_actual_tcp_pose(self, rp = ReqProtocol.HTTP):
-        raw = ''
-        if rp == ReqProtocol.HTTP:
-            raw = self.get_robot_data()['data']['actual_tcp_pose']
-        elif rp == ReqProtocol.WS:
-            raw = self.get_robot_data(ReqProtocol.WS)['data']['actual_tcp_pose']
+        raw = self.get_robot_data(rp)['data']['actual_tcp_pose']
         return CartesianPos(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
 
     def move_check(self, rp = ReqProtocol.HTTP):
