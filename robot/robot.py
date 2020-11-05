@@ -7,6 +7,8 @@ import requests
 import robot.api as api
 from enum import Enum, unique
 from time import sleep
+import asyncio
+import websockets
 
 @unique
 class RobotState(Enum):
@@ -25,6 +27,10 @@ class RobotState(Enum):
     STOP = 12         # 普通停止
     FINETUNING = 13   # 微调中
 
+@unique
+class ReqProtocol(Enum):
+    HTTP = 0    # http协议
+    WS = 1      # Websocket协议
 
 class Pose:
     def __init__(self, x, y, z):
@@ -52,59 +58,98 @@ class Robot():
         self.ip = ip
         self.http_port = 80
         self.http_url = "http://{}:{}".format(self.ip, self.http_port)
+        self.ws_url = "ws://{}/ws/public".format(self.ip)
+        self.ws_cmd_id = 0
         self.socket_port = 5171
         self.lua_port = 5180
     
+    def get_ws_cmd_id(self):
+        self.ws_cmd_id += 1
+        return self.ws_cmd_id
+
+    def build_req_json(self, cmd, data = None, id = 0):
+        req = {"cmd": cmd}
+        if data is not None:
+            req["data"] = data
+        if id > 0:
+            req["id"] = id
+
+        return json.dumps(req)
+
     def cmd_via_http(self, cmd, data = None):
-        req = ''
-        if data is None:
-            req = json.dumps({
-                "cmd": cmd
-            })
-        else:
-            req = json.dumps({
-                "cmd": cmd,
-                "data": data,
-            })
-        r = requests.post("{}{}".format(self.http_url, api.HTTP_ROBOT_ACTION), req)
+        r = requests.post("{}{}".format(self.http_url, api.HTTP_ROBOT_ACTION), self.build_req_json(cmd, data))
         r = json.loads(r.text)
+        # print("http resp:{}".format(r))
         return r
 
-    def get_robot_data(self):
-        r = self.cmd_via_http(api.HTTP_CMD_ROBOT_DATA)
-        return r
+    async def cmd_via_ws(self, cmd, data = None):
+        async with websockets.connect(self.ws_url) as websocket:
+            self.ws_cmd_id += 1
+            await websocket.send(self.build_req_json(cmd, data, self.get_ws_cmd_id()))
+            resp = await websocket.recv()
+            r = json.loads(resp)
+            # print("ws resp:{}".format(r))
+            return r
 
-    def get_robot_mode(self):
-        mode = RobotState(self.get_robot_data()['data']['robot_mode'])
-        return mode
+    def get_robot_data(self, rp = ReqProtocol.HTTP):
+        if rp == ReqProtocol.HTTP:
+            return self.cmd_via_http(api.CMD_ROBOT_DATA)
+        elif rp == ReqProtocol.WS:
+            return asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_ROBOT_DATA))
 
-    def get_target_joints(self):
-        return self.get_robot_data()['data']['target_joint']
+    def get_robot_mode(self, rp = ReqProtocol.HTTP):
+        if rp == ReqProtocol.HTTP:
+            return RobotState(self.get_robot_data()['data']['robot_mode'])
+        elif rp == ReqProtocol.WS:
+            return RobotState(self.get_robot_data(ReqProtocol.WS)['data']['robot_mode'])
 
-    def get_actual_joints(self):
-        return self.get_robot_data()['data']['actual_joint']
+    def get_target_joints(self, rp = ReqProtocol.HTTP):
+        if rp == ReqProtocol.HTTP:
+            return self.get_robot_data()['data']['target_joint']
+        elif rp == ReqProtocol.WS:
+            return self.get_robot_data(ReqProtocol.WS)['data']['target_joint']
 
-    def get_target_tcp_pose(self):
-        raw = self.get_robot_data()['data']['target_tcp_pose']
+    def get_actual_joints(self, rp = ReqProtocol.HTTP):
+        if rp == ReqProtocol.HTTP:
+            return self.get_robot_data()['data']['actual_joint']
+        elif rp == ReqProtocol.WS:
+            return self.get_robot_data(ReqProtocol.WS)['data']['actual_joint']
+
+    def get_target_tcp_pose(self, rp = ReqProtocol.HTTP):
+        raw = ''
+        if rp == ReqProtocol.HTTP:
+            raw = self.get_robot_data()['data']['target_tcp_pose']
+        elif rp == ReqProtocol.WS:
+            raw = self.get_robot_data(ReqProtocol.WS)['data']['target_tcp_pose']
         return CartesianPos(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
 
-    def get_actual_tcp_pose(self):
-        raw = self.get_robot_data()['data']['actual_tcp_pose']
+    def get_actual_tcp_pose(self, rp = ReqProtocol.HTTP):
+        raw = ''
+        if rp == ReqProtocol.HTTP:
+            raw = self.get_robot_data()['data']['actual_tcp_pose']
+        elif rp == ReqProtocol.WS:
+            raw = self.get_robot_data(ReqProtocol.WS)['data']['actual_tcp_pose']
         return CartesianPos(raw[0], raw[1], raw[2], raw[3], raw[4], raw[5])
 
-    def move_check(self):
+    def move_check(self, rp = ReqProtocol.HTTP):
         mode = self.get_robot_mode()
         if mode == RobotState.ROBOT_ON or mode == RobotState.STOP or mode == RobotState.ESTOP: # start robot
-            self.cmd_via_http(api.HTTP_CMD_START_SYS)
+            if rp == ReqProtocol.HTTP:
+                self.cmd_via_http(api.CMD_START_SYS)
+            elif rp == ReqProtocol.WS:
+                asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_START_SYS))
         elif mode == RobotState.TEACHING: # end teach
-            self.cmd_via_http(api.HTTP_CMD_END_TEACH_MODE)
+            if rp == ReqProtocol.HTTP:
+                self.cmd_via_http(api.CMD_END_TEACH_MODE)
+            elif rp == ReqProtocol.WS:
+                asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_END_TEACH_MODE))
         mode = self.get_robot_mode()
         while mode != RobotState.IDLE:
             print('robot not ready, current mode: {}'.format(mode))
             sleep(1)
             mode = self.get_robot_mode()
 
-    def movej(self, pose, is_joint_angle = True, acc = 1, vel = 1, time = 0):
+    def movej(self, pose, is_joint_angle = True, acc = 1, vel = 1, time = 0, rp = ReqProtocol.HTTP):
         data ={
             "pose_to": pose,
             "is_joint_angle": is_joint_angle,
@@ -113,9 +158,12 @@ class Robot():
             "time": time,
             "smooth_move_to_next": 0
         }
-        return self.cmd_via_http(api.HTTP_CMD_MOVEJ, data)
+        if rp == ReqProtocol.HTTP:
+            return self.cmd_via_http(api.CMD_MOVEJ, data)
+        elif rp == ReqProtocol.WS:
+            return asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_MOVEJ, data))
 
-    def movel(self, pose, is_joint_angle = True, acc = 1, vel = 1, time = 0):
+    def movel(self, pose, is_joint_angle = True, acc = 1, vel = 1, time = 0, rp = ReqProtocol.HTTP):
         data ={
             "pose_to": pose,
             "is_joint_angle": is_joint_angle,
@@ -124,6 +172,14 @@ class Robot():
             "time": time,
             "smooth_move_to_next": 0
         }
-        return self.cmd_via_http(api.HTTP_CMD_MOVEL, data)
-
+        if rp == ReqProtocol.HTTP:
+            return self.cmd_via_http(api.CMD_MOVEL, data)
+        elif rp == ReqProtocol.WS:
+            return asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_MOVEL, data))
+    
+    def stop_move(self, rp = ReqProtocol.HTTP):
+        if rp == ReqProtocol.HTTP:
+            return self.cmd_via_http(api.CMD_STOP_MOVE)
+        elif rp == ReqProtocol.WS:
+            return asyncio.get_event_loop().run_until_complete(self.cmd_via_ws(api.CMD_STOP_MOVE))
     
