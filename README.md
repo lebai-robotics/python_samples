@@ -26,7 +26,7 @@ python3 -m pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/sim
 
 - install libs
 ```
-python3 -m pip install pyyaml requests
+python3 -m pip install pyyaml requests websockets asyncio
 ```
 
 ## Run
